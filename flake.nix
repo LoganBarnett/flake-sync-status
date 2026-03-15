@@ -40,7 +40,35 @@
       pkgs.openssl
       pkgs.jq
     ];
+
+    craneLibFor = system: let
+      pkgs = pkgsFor system;
+      toolchain = pkgs.rust-bin.stable.latest.default;
+    in (crane.mkLib pkgs).overrideToolchain toolchain;
+
+    commonArgsFor = system: let
+      pkgs = pkgsFor system;
+    in {
+      src = (craneLibFor system).cleanCargoSource ./.;
+      buildInputs = pkgs.lib.optionals pkgs.stdenv.isDarwin [
+        pkgs.darwin.apple_sdk.frameworks.Security
+        pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+      ];
+      nativeBuildInputs = [ pkgs.pkg-config ];
+    };
   in {
+
+    packages = forAllSystems (system: {
+      default = (craneLibFor system).buildPackage (commonArgsFor system);
+      flake-sync-status = self.packages.${system}.default;
+    });
+
+    apps = forAllSystems (system: {
+      default = {
+        type = "app";
+        program = "${self.packages.${system}.default}/bin/flake-sync-status";
+      };
+    });
 
     devShells = forAllSystems (system: {
       default = (pkgsFor system).mkShell {
