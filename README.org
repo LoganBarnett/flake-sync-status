@@ -75,6 +75,16 @@ The expected path is computed from the derivation graph without building
 anything; it is the deterministic output path Nix would use if the
 configuration were built right now.
 
+* Output streams
+
+Program output (the table or JSON) goes to *stdout*.  All log output goes to
+*stderr*.  This lets callers separate the two streams, e.g. pipe JSON while
+watching logs:
+
+#+begin_src shell :exports code
+flake-sync-status --json . 2>/dev/null | jq '.[] | select(.in_sync | not)'
+#+end_src
+
 * Development
 
 #+begin_src shell :exports code

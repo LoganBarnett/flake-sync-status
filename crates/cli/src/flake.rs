@@ -2,6 +2,7 @@ use crate::host;
 use serde::Serialize;
 use std::process::Command;
 use thiserror::Error;
+use tracing::warn;
 
 #[derive(Debug, Error)]
 pub enum FlakeError {
@@ -101,6 +102,7 @@ fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
   let flake_path = match nix_eval_raw(flake, &path_attr) {
     Ok(p) => Some(p),
     Err(e) => {
+      warn!(hostname, error = %e, "flake eval failed");
       errors.push(e);
       None
     }
@@ -112,6 +114,7 @@ fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
   let current_path = match host::get_current_system(hostname) {
     Ok(path) => Some(path),
     Err(e) => {
+      warn!(hostname, error = %e, "host query failed");
       errors.push(e.to_string());
       None
     }

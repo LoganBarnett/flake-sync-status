@@ -12,10 +12,12 @@
 mod color;
 mod flake;
 mod host;
+mod logging;
 mod output;
 
 use clap::Parser;
-use flake_sync_status_lib::{init_logging, LogFormat, LogLevel};
+use flake_sync_status_lib::{LogFormat, LogLevel};
+use logging::init_logging;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
