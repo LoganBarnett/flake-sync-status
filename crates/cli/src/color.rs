@@ -1,12 +1,9 @@
-use std::fmt;
-
 /// FNV-1a hash for consistent, deterministic color generation from strings.
 fn fnv1a(s: &str) -> u64 {
   const FNV_PRIME: u64 = 1099511628211;
   const FNV_OFFSET: u64 = 14695981039346656037;
-  s.bytes().fold(FNV_OFFSET, |hash, byte| {
-    (hash ^ byte as u64).wrapping_mul(FNV_PRIME)
-  })
+  s.bytes()
+    .fold(FNV_OFFSET, |hash, byte| (hash ^ byte as u64).wrapping_mul(FNV_PRIME))
 }
 
 /// Convert HSV (hue in [0, 360), saturation and value in [0, 1]) to RGB.
@@ -28,76 +25,47 @@ fn hsv_to_rgb(hue: f64, saturation: f64, value: f64) -> (u8, u8, u8) {
   ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
-/// Derive a rainbow color from a string via FNV-1a hashing.  Consistent
-/// across runs: the same input always yields the same color.
-pub fn rainbow_color(s: &str) -> (u8, u8, u8) {
-  let hue = (fnv1a(s) % 360) as f64;
-  // S=0.85, V=1.0 - vivid but avoids near-white and muddy brown.
-  hsv_to_rgb(hue, 0.85, 1.0)
+/// Wrap text in a 24-bit ANSI foreground color sequence.
+fn fg(r: u8, g: u8, b: u8, text: &str) -> String {
+  format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
 }
 
-pub struct Colored<T: fmt::Display> {
-  text: T,
-  r: u8,
-  g: u8,
-  b: u8,
+/// Color text with a rainbow foreground color derived from its content via
+/// FNV-1a hashing.  The same string always yields the same color across runs.
+pub fn rainbow(text: &str) -> String {
+  let hue = (fnv1a(text) % 360) as f64;
+  let (r, g, b) = hsv_to_rgb(hue, 0.85, 1.0);
+  fg(r, g, b, text)
 }
 
-impl<T: fmt::Display> Colored<T> {
-  pub fn new(text: T, r: u8, g: u8, b: u8) -> Self {
-    Self { text, r, g, b }
-  }
-
-  pub fn green(text: T) -> Self {
-    Self::new(text, 60, 220, 100)
-  }
-
-  pub fn red(text: T) -> Self {
-    Self::new(text, 220, 60, 60)
-  }
-
-  pub fn yellow(text: T) -> Self {
-    Self::new(text, 220, 180, 60)
-  }
+pub fn green(text: &str) -> String {
+  fg(60, 220, 100, text)
 }
 
-impl<'a> Colored<&'a str> {
-  pub fn rainbow(text: &'a str) -> Self {
-    let (r, g, b) = rainbow_color(text);
-    Self::new(text, r, g, b)
-  }
+pub fn red(text: &str) -> String {
+  fg(220, 60, 60, text)
 }
 
-impl<T: fmt::Display> fmt::Display for Colored<T> {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    write!(
-      f,
-      "\x1b[38;2;{};{};{}m{}\x1b[0m",
-      self.r, self.g, self.b, self.text
-    )
-  }
+pub fn yellow(text: &str) -> String {
+  fg(220, 180, 60, text)
 }
 
 /// Colorize each segment of a platform double (e.g. `aarch64-linux`) with its
-/// own rainbow-derived color.  The `-` separator is uncolored.
+/// own rainbow-derived foreground color.  The `-` separator is uncolored.
 pub fn rainbow_platform(system: &str) -> String {
   system
     .split('-')
-    .map(|seg| Colored::rainbow(seg).to_string())
+    .map(|seg| rainbow(seg))
     .collect::<Vec<_>>()
-    .join("\x1b[0m-")
+    .join("-")
 }
 
 /// Extract the hash portion of a Nix store path and return up to 12 chars.
 /// `/nix/store/abc12345xyz0-name` → `abc12345xyz0`
 pub fn store_hash_abbrev(store_path: &str) -> &str {
-  let after_store = store_path
-    .strip_prefix("/nix/store/")
-    .unwrap_or(store_path);
-  let hash_end = after_store
-    .find('-')
-    .unwrap_or(after_store.len())
-    .min(12);
+  let after_store =
+    store_path.strip_prefix("/nix/store/").unwrap_or(store_path);
+  let hash_end = after_store.find('-').unwrap_or(after_store.len()).min(12);
   &after_store[..hash_end]
 }
 
@@ -106,14 +74,14 @@ mod tests {
   use super::*;
 
   #[test]
-  fn test_same_string_same_color() {
-    assert_eq!(rainbow_color("silicon"), rainbow_color("silicon"));
+  fn test_rainbow_is_deterministic() {
+    assert_eq!(rainbow("silicon"), rainbow("silicon"));
   }
 
   #[test]
-  fn test_different_strings_likely_different_color() {
+  fn test_rainbow_differs_per_input() {
     // Not guaranteed but extremely likely with a good hash.
-    assert_ne!(rainbow_color("silicon"), rainbow_color("argon"));
+    assert_ne!(rainbow("silicon"), rainbow("argon"));
   }
 
   #[test]

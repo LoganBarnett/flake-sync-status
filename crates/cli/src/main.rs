@@ -32,6 +32,7 @@ enum AppError {
 #[derive(Debug, Parser)]
 #[command(
   name = "flake-sync-status",
+  version,
   about = "Report whether each NixOS/nix-darwin host's active generation \
            matches what the flake would deploy"
 )]
@@ -52,10 +53,7 @@ struct Cli {
 fn main() -> Result<(), AppError> {
   let cli = Cli::parse();
 
-  let log_level = cli
-    .log_level
-    .parse::<LogLevel>()
-    .unwrap_or(LogLevel::Warn);
+  let log_level = cli.log_level.parse::<LogLevel>().unwrap_or(LogLevel::Warn);
   init_logging(log_level, LogFormat::Text);
 
   let results = flake::query_all_hosts(&cli.flake)?;

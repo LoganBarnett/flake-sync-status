@@ -1,4 +1,4 @@
-use crate::color::{rainbow_platform, store_hash_abbrev, Colored};
+use crate::color;
 use crate::flake::HostStatus;
 use serde_json;
 use thiserror::Error;
@@ -29,55 +29,48 @@ pub fn print_human(hosts: &[HostStatus]) {
     .max(6);
 
   println!(
-    "{:<hw$}  {:<sw$}  {:<12}  {:<12}  SYNC",
+    "{:<hw$}  {:<sw$}  {:<12}  {:<12}  {}",
     "HOSTNAME",
     "SYSTEM",
     "EXPECTED",
     "CURRENT",
+    "SYNC",
     hw = hostname_w,
     sw = system_w,
   );
-  println!("{}", "-".repeat(hostname_w + system_w + 44));
+  println!("{}", "-".repeat(hostname_w + system_w + 46));
 
   for host in hosts {
     // Color the text first, then pad with plain spaces so ANSI escape codes
     // don't corrupt column alignment.
-    let hostname_col = colored_padded(
-      Colored::rainbow(&host.hostname).to_string(),
-      host.hostname.len(),
-      hostname_w,
-    );
-    let system_col = format!(
-      "{}{}",
-      rainbow_platform(&host.system),
-      spaces(system_w.saturating_sub(host.system.len())),
-    );
+    let hostname_col =
+      pad(&color::rainbow(&host.hostname), host.hostname.len(), hostname_w);
+
+    let system_col =
+      pad(&color::rainbow_platform(&host.system), host.system.len(), system_w);
 
     let expected_col = match &host.flake_path {
       Some(path) => {
-        let hash = store_hash_abbrev(path);
-        colored_padded(Colored::rainbow(hash).to_string(), hash.len(), 12)
+        let hash = color::store_hash_abbrev(path);
+        pad(&color::rainbow(hash), hash.len(), 12)
       }
-      None => colored_padded(Colored::yellow("eval error").to_string(), 10, 12),
+      None => pad(&color::yellow("eval error"), 10, 12),
     };
 
     let current_col = match &host.current_path {
       Some(path) => {
-        let hash = store_hash_abbrev(path);
-        colored_padded(Colored::rainbow(hash).to_string(), hash.len(), 12)
+        let hash = color::store_hash_abbrev(path);
+        pad(&color::rainbow(hash), hash.len(), 12)
       }
-      None => {
-        let msg: String = "unreachable".chars().take(12).collect();
-        colored_padded(Colored::yellow(&msg as &str).to_string(), msg.len(), 12)
-      }
+      None => pad(&color::yellow("unreachable"), 11, 12),
     };
 
     let sync = if host.in_sync {
-      Colored::green("✓").to_string()
+      color::green("✓")
     } else if host.flake_path.is_none() || host.current_path.is_none() {
-      Colored::yellow("?").to_string()
+      color::yellow("?")
     } else {
-      Colored::red("✗").to_string()
+      color::red("✗")
     };
 
     println!(
@@ -92,32 +85,17 @@ pub fn print_human(hosts: &[HostStatus]) {
     println!();
     println!("Errors:");
     for host in errored {
+      let prefix =
+        pad(&color::rainbow(&host.hostname), host.hostname.len(), hostname_w);
       for error in &host.errors {
-        println!(
-          "  {}  {}",
-          colored_padded(
-            Colored::rainbow(&host.hostname).to_string(),
-            host.hostname.len(),
-            hostname_w,
-          ),
-          error,
-        );
+        println!("  {}  {}", prefix, error);
       }
     }
   }
 }
 
-/// Return `colored_text` (with ANSI codes) right-padded to `width` visible
-/// characters by appending plain spaces.  `visible_len` is the display width
-/// of `colored_text` without escape codes.
-fn colored_padded(
-  colored_text: String,
-  visible_len: usize,
-  width: usize,
-) -> String {
-  format!("{}{}", colored_text, spaces(width.saturating_sub(visible_len)))
-}
-
-fn spaces(n: usize) -> String {
-  " ".repeat(n)
+/// Pad a pre-colored string to `width` visible characters by appending plain
+/// spaces.  `visible_len` must be the character count without escape codes.
+fn pad(colored: &str, visible_len: usize, width: usize) -> String {
+  format!("{}{}", colored, " ".repeat(width.saturating_sub(visible_len)))
 }
