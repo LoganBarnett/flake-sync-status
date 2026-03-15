@@ -52,9 +52,6 @@
       pname = "flake-sync-status";
       src = (craneLibFor system).cleanCargoSource ./.;
       nativeBuildInputs = [ pkgs.pkg-config ];
-      # Integration tests run the compiled binary directly, which requires a
-      # real environment with nix in PATH.  They can't pass in the sandbox.
-      doCheck = false;
     };
   in {
 
