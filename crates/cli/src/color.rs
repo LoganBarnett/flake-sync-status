@@ -1,3 +1,18 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static FORCE_NO_COLOR: AtomicBool = AtomicBool::new(false);
+
+/// Disable all color output.  Called at startup when `--no-color` is passed.
+/// The `NO_COLOR` environment variable (https://no-color.org/) is also honored.
+pub fn disable_color() {
+  FORCE_NO_COLOR.store(true, Ordering::Relaxed);
+}
+
+fn color_disabled() -> bool {
+  FORCE_NO_COLOR.load(Ordering::Relaxed)
+    || std::env::var_os("NO_COLOR").is_some()
+}
+
 /// FNV-1a hash for consistent, deterministic color generation from strings.
 fn fnv1a(s: &str) -> u64 {
   const FNV_PRIME: u64 = 1099511628211;
@@ -52,7 +67,11 @@ fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
 /// Wrap text in an ANSI foreground color sequence.  Uses 24-bit true color
 /// when COLORTERM=truecolor is set; falls back to xterm-256 otherwise so
 /// that Terminal.app's xterm profile renders foreground (not background) color.
+/// Returns plain text when color is disabled.
 fn fg(r: u8, g: u8, b: u8, text: &str) -> String {
+  if color_disabled() {
+    return text.to_string();
+  }
   let truecolor = std::env::var("COLORTERM")
     .map_or(false, |v| v == "truecolor" || v == "24bit");
   if truecolor {
@@ -83,8 +102,11 @@ pub fn yellow(text: &str) -> String {
 }
 
 /// Color text with a red background and black foreground, used to flag error
-/// states inline in the table.
+/// states inline in the table.  Returns plain text when color is disabled.
 pub fn error_bg(text: &str) -> String {
+  if color_disabled() {
+    return text.to_string();
+  }
   // Standard ANSI codes (41 = red bg, 30 = black fg) work on all terminals
   // including Terminal.app's xterm profile.
   format!("\x1b[41m\x1b[30m{text}\x1b[0m")

@@ -48,10 +48,18 @@ struct Cli {
   /// Log level (trace, debug, info, warn, error)
   #[arg(long, default_value = "warn", env = "LOG_LEVEL")]
   log_level: String,
+
+  /// Suppress all ANSI color codes in output (also honored via NO_COLOR env var)
+  #[arg(long)]
+  no_color: bool,
 }
 
 fn main() -> Result<(), AppError> {
   let cli = Cli::parse();
+
+  if cli.no_color {
+    color::disable_color();
+  }
 
   let log_level = cli.log_level.parse::<LogLevel>().unwrap_or(LogLevel::Warn);
   init_logging(log_level, LogFormat::Text);
