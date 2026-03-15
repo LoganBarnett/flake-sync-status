@@ -69,7 +69,7 @@ fn get_current_system_remote(hostname: &str) -> Result<String, HostError> {
   let output = Command::new("ssh")
     .args([
       "-o",
-      "ConnectTimeout=5",
+      "ConnectTimeout=10",
       // Fail immediately rather than prompting for passwords or host
       // key confirmations.
       "-o",

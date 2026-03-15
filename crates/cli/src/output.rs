@@ -53,12 +53,13 @@ pub fn print_human(hosts: &[HostStatus]) {
       spaces(system_w.saturating_sub(host.system.len())),
     );
 
-    let expected_hash = store_hash_abbrev(&host.flake_path);
-    let expected_col = colored_padded(
-      Colored::rainbow(expected_hash).to_string(),
-      expected_hash.len(),
-      12,
-    );
+    let expected_col = match &host.flake_path {
+      Some(path) => {
+        let hash = store_hash_abbrev(path);
+        colored_padded(Colored::rainbow(hash).to_string(), hash.len(), 12)
+      }
+      None => colored_padded(Colored::yellow("eval error").to_string(), 10, 12),
+    };
 
     let current_col = match &host.current_path {
       Some(path) => {
@@ -66,20 +67,14 @@ pub fn print_human(hosts: &[HostStatus]) {
         colored_padded(Colored::rainbow(hash).to_string(), hash.len(), 12)
       }
       None => {
-        let msg: String = host
-          .error
-          .as_deref()
-          .unwrap_or("unreachable")
-          .chars()
-          .take(12)
-          .collect();
+        let msg: String = "unreachable".chars().take(12).collect();
         colored_padded(Colored::yellow(&msg as &str).to_string(), msg.len(), 12)
       }
     };
 
     let sync = if host.in_sync {
       Colored::green("✓").to_string()
-    } else if host.current_path.is_none() {
+    } else if host.flake_path.is_none() || host.current_path.is_none() {
       Colored::yellow("?").to_string()
     } else {
       Colored::red("✗").to_string()
@@ -90,12 +85,36 @@ pub fn print_human(hosts: &[HostStatus]) {
       hostname_col, system_col, expected_col, current_col, sync,
     );
   }
+
+  let errored: Vec<&HostStatus> =
+    hosts.iter().filter(|h| !h.errors.is_empty()).collect();
+  if !errored.is_empty() {
+    println!();
+    println!("Errors:");
+    for host in errored {
+      for error in &host.errors {
+        println!(
+          "  {}  {}",
+          colored_padded(
+            Colored::rainbow(&host.hostname).to_string(),
+            host.hostname.len(),
+            hostname_w,
+          ),
+          error,
+        );
+      }
+    }
+  }
 }
 
 /// Return `colored_text` (with ANSI codes) right-padded to `width` visible
 /// characters by appending plain spaces.  `visible_len` is the display width
 /// of `colored_text` without escape codes.
-fn colored_padded(colored_text: String, visible_len: usize, width: usize) -> String {
+fn colored_padded(
+  colored_text: String,
+  visible_len: usize,
+  width: usize,
+) -> String {
   format!("{}{}", colored_text, spaces(width.saturating_sub(visible_len)))
 }
 

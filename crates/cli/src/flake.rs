@@ -15,9 +15,6 @@ pub enum FlakeError {
     source: std::io::Error,
   },
 
-  #[error("nix eval of {attr} failed: {stderr}")]
-  Eval { attr: String, stderr: String },
-
   #[error("Failed to parse host list from flake {flake}: {source}")]
   ParseHostList {
     flake: String,
@@ -31,28 +28,30 @@ pub struct HostStatus {
   pub hostname: String,
   /// Platform double such as `x86_64-linux` or `aarch64-darwin`.
   pub system: String,
-  /// Store path the flake expects for this host.
-  pub flake_path: String,
+  /// Store path the flake expects for this host, or null when flake
+  /// evaluation failed for this host.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub flake_path: Option<String>,
   /// Store path of the currently-active generation on the host, or null when
   /// the host was unreachable.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub current_path: Option<String>,
-  /// Error message when the host was unreachable.
-  #[serde(skip_serializing_if = "Option::is_none")]
-  pub error: Option<String>,
+  /// Error messages from flake evaluation or SSH connection failures.
+  #[serde(skip_serializing_if = "Vec::is_empty")]
+  pub errors: Vec<String>,
   pub in_sync: bool,
 }
 
 /// Query all nixosConfigurations and darwinConfigurations in the flake and
-/// return a status entry for each host.
+/// return a status entry for each host.  Per-host eval or SSH errors are
+/// captured in HostStatus.errors rather than aborting the whole run.
 pub fn query_all_hosts(flake: &str) -> Result<Vec<HostStatus>, FlakeError> {
   let mut results = Vec::new();
 
   for config_type in &["nixosConfigurations", "darwinConfigurations"] {
     let hosts = list_hosts(flake, config_type)?;
     for hostname in hosts {
-      let status = query_host(flake, &hostname, config_type)?;
-      results.push(status);
+      results.push(query_host(flake, &hostname, config_type));
     }
   }
 
@@ -87,11 +86,9 @@ fn list_hosts(
   Ok(names)
 }
 
-fn query_host(
-  flake: &str,
-  hostname: &str,
-  config_type: &str,
-) -> Result<HostStatus, FlakeError> {
+fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
+  let mut errors = Vec::new();
+
   let path_attr = format!(
     "{}#{}.{}.config.system.build.toplevel.outPath",
     flake, config_type, hostname
@@ -101,47 +98,63 @@ fn query_host(
     flake, config_type, hostname
   );
 
-  let flake_path = nix_eval_raw(flake, &path_attr)?;
+  let flake_path = match nix_eval_raw(flake, &path_attr) {
+    Ok(p) => Some(p),
+    Err(e) => {
+      errors.push(e);
+      None
+    }
+  };
+
   let system =
     nix_eval_raw(flake, &system_attr).unwrap_or_else(|_| "unknown".to_string());
 
-  let (current_path, error) = match host::get_current_system(hostname) {
-    Ok(path) => (Some(path), None),
-    Err(e) => (None, Some(e.to_string())),
+  let current_path = match host::get_current_system(hostname) {
+    Ok(path) => Some(path),
+    Err(e) => {
+      errors.push(e.to_string());
+      None
+    }
   };
 
-  let in_sync = current_path
-    .as_ref()
-    .map(|p| *p == flake_path)
-    .unwrap_or(false);
+  let in_sync = match (&flake_path, &current_path) {
+    (Some(f), Some(c)) => f == c,
+    _ => false,
+  };
 
-  Ok(HostStatus {
+  HostStatus {
     hostname: hostname.to_string(),
     system,
     flake_path,
     current_path,
-    error,
+    errors,
     in_sync,
-  })
+  }
 }
 
-fn nix_eval_raw(flake: &str, attr: &str) -> Result<String, FlakeError> {
+fn nix_eval_raw(flake: &str, attr: &str) -> Result<String, String> {
   let output = Command::new("nix")
     .args(["eval", "--raw", attr])
     .output()
-    .map_err(|source| FlakeError::Spawn {
-      flake: flake.to_string(),
-      attr: attr.to_string(),
-      source,
+    .map_err(|e| {
+      format!(
+        "Failed to spawn nix for attribute {attr} at flake {flake}: {e}"
+      )
     })?;
 
   if !output.status.success() {
-    return Err(FlakeError::Eval {
-      attr: attr.to_string(),
-      stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
-    });
+    // Extract just the final error line from nix's verbose stderr rather than
+    // dumping the full trace into the errors list.
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let summary = stderr
+      .lines()
+      .filter(|l| l.trim_start().starts_with("error:"))
+      .last()
+      .unwrap_or(stderr.trim())
+      .trim()
+      .to_string();
+    return Err(format!("nix eval {attr}: {summary}"));
   }
 
   Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
-
