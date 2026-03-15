@@ -82,6 +82,14 @@ pub fn yellow(text: &str) -> String {
   fg(220, 180, 60, text)
 }
 
+/// Color text with a red background and black foreground, used to flag error
+/// states inline in the table.
+pub fn error_bg(text: &str) -> String {
+  // Standard ANSI codes (41 = red bg, 30 = black fg) work on all terminals
+  // including Terminal.app's xterm profile.
+  format!("\x1b[41m\x1b[30m{text}\x1b[0m")
+}
+
 /// Colorize each segment of a platform double (e.g. `aarch64-linux`) with its
 /// own rainbow-derived foreground color.  The `-` separator is uncolored.
 pub fn rainbow_platform(system: &str) -> String {

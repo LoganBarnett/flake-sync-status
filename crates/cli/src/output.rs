@@ -54,7 +54,7 @@ pub fn print_human(hosts: &[HostStatus]) {
         let hash = color::store_hash_abbrev(path);
         pad(&color::rainbow(hash), hash.len(), 12)
       }
-      None => pad(&color::yellow("eval error"), 10, 12),
+      None => pad(&color::error_bg("eval error"), 10, 12),
     };
 
     let current_col = match &host.current_path {
@@ -62,7 +62,7 @@ pub fn print_human(hosts: &[HostStatus]) {
         let hash = color::store_hash_abbrev(path);
         pad(&color::rainbow(hash), hash.len(), 12)
       }
-      None => pad(&color::yellow("unreachable"), 11, 12),
+      None => pad(&color::error_bg("unreachable"), 11, 12),
     };
 
     let sync = if host.in_sync {
