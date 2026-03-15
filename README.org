@@ -1,0 +1,85 @@
+#+title:     flake-sync-status
+#+author:    Logan Barnett
+#+email:     logustus@gmail.com
+#+date:      <2026-02-25 Wed>
+#+language:  en
+
+A CLI tool that queries a Nix flake for all of its ~nixosConfigurations~ and
+~darwinConfigurations~, then checks each host to see whether the currently-active
+generation matches what the flake would deploy.
+
+Useful for rolling out changes piecemeal across a fleet and confirming each
+host has applied the latest config.
+
+* Usage
+
+#+begin_src shell :exports code
+flake-sync-status [OPTIONS] [FLAKE]
+#+end_src
+
+~FLAKE~ defaults to the current directory.
+
+** Options
+
+| Flag           | Description                          |
+|----------------+--------------------------------------|
+| ~-j~, ~--json~ | Emit JSON instead of the table       |
+| ~--log-level~  | Log level (default: ~warn~)          |
+| ~-h~, ~--help~ | Print help                           |
+
+** Human-readable output
+
+Each row shows:
+
+- *Hostname* - colored consistently by hash
+- *System* - platform double (~x86_64-linux~, ~aarch64-darwin~, …) with each
+  segment colored independently
+- *Expected* - abbreviated store hash from ~nix eval~, rainbow-colored
+- *Current* - abbreviated store hash from ~/run/current-system~ on the host,
+  rainbow-colored (or an error indicator)
+- *Sync* - green ~✓~, red ~✗~, or yellow ~?~ (unreachable)
+
+** JSON output
+
+#+begin_src json :exports code
+[
+  {
+    "hostname": "silicon",
+    "system": "x86_64-linux",
+    "flake_path": "/nix/store/abc123...-nixos-system-silicon",
+    "current_path": "/nix/store/abc123...-nixos-system-silicon",
+    "in_sync": true
+  },
+  {
+    "hostname": "argon",
+    "system": "x86_64-linux",
+    "flake_path": "/nix/store/def456...-nixos-system-argon",
+    "current_path": null,
+    "error": "SSH to argon failed: ...",
+    "in_sync": false
+  }
+]
+#+end_src
+
+* How it works
+
+For each host the tool:
+
+1. Runs ~nix eval --raw '.#<nixos|darwin>Configurations.HOST.config.system.build.toplevel.outPath'~
+   to get the store path the flake expects.
+2. Connects to the host (or reads locally if it matches ~hostname~) and runs
+   ~readlink -f /run/current-system~ to get the active generation's store path.
+3. Compares the two paths and reports the result.
+
+The expected path is computed from the derivation graph without building
+anything; it is the deterministic output path Nix would use if the
+configuration were built right now.
+
+* Development
+
+#+begin_src shell :exports code
+nix develop      # enter the dev environment
+cargo build      # build
+cargo test       # run tests
+cargo run -- .   # run against the flake in the current directory
+#+end_src
