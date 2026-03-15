@@ -52,6 +52,9 @@
       pname = "flake-sync-status";
       src = (craneLibFor system).cleanCargoSource ./.;
       nativeBuildInputs = [ pkgs.pkg-config ];
+      # Run unit tests only.  Integration tests in tests/ invoke the compiled
+      # binary directly, which is not available in the Nix sandbox.
+      cargoTestExtraArgs = "--lib --bins";
     };
   in {
 

@@ -19,7 +19,6 @@ fn get_binary_path() -> PathBuf {
 }
 
 #[test]
-#[ignore = "requires the compiled binary on disk; run with cargo test -- --ignored"]
 fn test_help_flag() {
   let output = Command::new(get_binary_path())
     .arg("--help")
@@ -36,7 +35,6 @@ fn test_help_flag() {
 }
 
 #[test]
-#[ignore = "requires the compiled binary on disk; run with cargo test -- --ignored"]
 fn test_version_flag() {
   let output = Command::new(get_binary_path())
     .arg("--version")
@@ -53,7 +51,6 @@ fn test_version_flag() {
 }
 
 #[test]
-#[ignore = "requires the compiled binary on disk; run with cargo test -- --ignored"]
 fn test_json_flag_is_accepted() {
   // Running against a real flake would require nix in PATH and a network
   // connection.  Just verify the flag is accepted without errors unrelated
