@@ -111,7 +111,17 @@ fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
   let system =
     nix_eval_raw(flake, &system_attr).unwrap_or_else(|_| "unknown".to_string());
 
-  let current_path = match host::get_current_system(hostname) {
+  // Use the FQDN from the flake config as the SSH target so that host key
+  // verification matches known_hosts entries (which are keyed by FQDN).
+  // Falls back to the attribute name if the option is absent (e.g. darwin).
+  let fqdn_attr = format!(
+    "{}#{}.{}.config.networking.fqdn",
+    flake, config_type, hostname
+  );
+  let ssh_host =
+    nix_eval_raw(flake, &fqdn_attr).unwrap_or_else(|_| hostname.to_string());
+
+  let current_path = match host::get_current_system(&ssh_host) {
     Ok(path) => Some(path),
     Err(e) => {
       warn!(hostname, error = %e, "host query failed");
