@@ -25,9 +25,41 @@ fn hsv_to_rgb(hue: f64, saturation: f64, value: f64) -> (u8, u8, u8) {
   ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
-/// Wrap text in a 24-bit ANSI foreground color sequence.
+/// Map an 8-bit RGB component to the nearest xterm-256 color cube level
+/// (0-5).  Cube values are 0, 95, 135, 175, 215, 255.
+fn to_cube_level(v: u8) -> u8 {
+  // Midpoints between adjacent cube values.
+  if v < 48 {
+    0
+  } else if v < 115 {
+    1
+  } else if v < 155 {
+    2
+  } else if v < 195 {
+    3
+  } else if v < 235 {
+    4
+  } else {
+    5
+  }
+}
+
+/// Convert 8-bit RGB to the nearest xterm-256 6x6x6 color cube index (16-231).
+fn rgb_to_xterm256(r: u8, g: u8, b: u8) -> u8 {
+  16 + 36 * to_cube_level(r) + 6 * to_cube_level(g) + to_cube_level(b)
+}
+
+/// Wrap text in an ANSI foreground color sequence.  Uses 24-bit true color
+/// when COLORTERM=truecolor is set; falls back to xterm-256 otherwise so
+/// that Terminal.app's xterm profile renders foreground (not background) color.
 fn fg(r: u8, g: u8, b: u8, text: &str) -> String {
-  format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
+  let truecolor = std::env::var("COLORTERM")
+    .map_or(false, |v| v == "truecolor" || v == "24bit");
+  if truecolor {
+    format!("\x1b[38;2;{r};{g};{b}m{text}\x1b[0m")
+  } else {
+    format!("\x1b[38;5;{}m{text}\x1b[0m", rgb_to_xterm256(r, g, b))
+  }
 }
 
 /// Color text with a rainbow foreground color derived from its content via
@@ -82,6 +114,17 @@ mod tests {
   fn test_rainbow_differs_per_input() {
     // Not guaranteed but extremely likely with a good hash.
     assert_ne!(rainbow("silicon"), rainbow("argon"));
+  }
+
+  #[test]
+  fn test_rgb_to_xterm256_primaries() {
+    // Primary colors should map to the expected 6x6x6 cube corners.
+    assert_eq!(rgb_to_xterm256(255, 0, 0), 196); // red
+    assert_eq!(rgb_to_xterm256(0, 255, 0), 46); // green
+    assert_eq!(rgb_to_xterm256(0, 0, 255), 21); // blue
+    assert_eq!(rgb_to_xterm256(255, 255, 0), 226); // yellow
+    assert_eq!(rgb_to_xterm256(0, 255, 255), 51); // cyan
+    assert_eq!(rgb_to_xterm256(255, 0, 255), 201); // magenta
   }
 
   #[test]
