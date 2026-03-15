@@ -61,8 +61,8 @@ impl<T: fmt::Display> Colored<T> {
   }
 }
 
-impl Colored<&str> {
-  pub fn rainbow(text: &str) -> Self {
+impl<'a> Colored<&'a str> {
+  pub fn rainbow(text: &'a str) -> Self {
     let (r, g, b) = rainbow_color(text);
     Self::new(text, r, g, b)
   }
