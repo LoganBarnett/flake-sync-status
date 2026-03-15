@@ -46,17 +46,34 @@ pub struct HostStatus {
 /// Query all nixosConfigurations and darwinConfigurations in the flake and
 /// return a status entry for each host.  Per-host eval or SSH errors are
 /// captured in HostStatus.errors rather than aborting the whole run.
+///
+/// All hosts are queried in parallel: each makes independent nix eval and SSH
+/// calls with no shared mutable state, so serializing them buys nothing.
 pub fn query_all_hosts(flake: &str) -> Result<Vec<HostStatus>, FlakeError> {
-  let mut results = Vec::new();
-
+  // Collect (hostname, config_type) pairs first — list_hosts is fast and must
+  // propagate FlakeError before we start spawning threads.
+  let mut pairs: Vec<(String, String)> = Vec::new();
   for config_type in &["nixosConfigurations", "darwinConfigurations"] {
-    let hosts = list_hosts(flake, config_type)?;
-    for hostname in hosts {
-      results.push(query_host(flake, &hostname, config_type));
+    for hostname in list_hosts(flake, config_type)? {
+      pairs.push((hostname, config_type.to_string()));
     }
   }
 
-  Ok(results)
+  let flake = flake.to_string();
+  let handles: Vec<_> = pairs
+    .into_iter()
+    .map(|(hostname, config_type)| {
+      let flake = flake.clone();
+      std::thread::spawn(move || query_host(&flake, &hostname, &config_type))
+    })
+    .collect();
+
+  Ok(
+    handles
+      .into_iter()
+      .map(|h| h.join().expect("host query thread panicked"))
+      .collect(),
+  )
 }
 
 fn list_hosts(
@@ -78,10 +95,12 @@ fn list_hosts(
     return Ok(vec![]);
   }
 
-  let names: Vec<String> = serde_json::from_slice(&output.stdout)
-    .map_err(|source| FlakeError::ParseHostList {
-      flake: flake.to_string(),
-      source,
+  let names: Vec<String> =
+    serde_json::from_slice(&output.stdout).map_err(|source| {
+      FlakeError::ParseHostList {
+        flake: flake.to_string(),
+        source,
+      }
     })?;
 
   Ok(names)
@@ -114,10 +133,8 @@ fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
   // Use the FQDN from the flake config as the SSH target so that host key
   // verification matches known_hosts entries (which are keyed by FQDN).
   // Falls back to the attribute name if the option is absent (e.g. darwin).
-  let fqdn_attr = format!(
-    "{}#{}.{}.config.networking.fqdn",
-    flake, config_type, hostname
-  );
+  let fqdn_attr =
+    format!("{}#{}.{}.config.networking.fqdn", flake, config_type, hostname);
   let ssh_host =
     nix_eval_raw(flake, &fqdn_attr).unwrap_or_else(|_| hostname.to_string());
 
@@ -150,9 +167,7 @@ fn nix_eval_raw(flake: &str, attr: &str) -> Result<String, String> {
     .args(["eval", "--raw", attr])
     .output()
     .map_err(|e| {
-      format!(
-        "Failed to spawn nix for attribute {attr} at flake {flake}: {e}"
-      )
+      format!("Failed to spawn nix for attribute {attr} at flake {flake}: {e}")
     })?;
 
   if !output.status.success() {
