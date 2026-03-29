@@ -72,6 +72,9 @@
       };
     });
 
+    nixosModules.default = import ./nix/modules/nixos.nix;
+    darwinModules.default = import ./nix/modules/darwin.nix;
+
     devShells = forAllSystems (system: {
       default = (pkgsFor system).mkShell {
         buildInputs = devPackages (pkgsFor system);

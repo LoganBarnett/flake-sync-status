@@ -86,7 +86,7 @@ Changes made:
 
 * Offline Mode: NixOS and Darwin Modules
 
-** TODO [#A] Create nix/modules/nixos.nix
+** DONE [#A] Create nix/modules/nixos.nix
 NixOS module for the =flakeStatus.online= option.  The =config= section
 is intentionally empty — the option is consumed externally by the CLI,
 not by the host's own activation:
@@ -109,12 +109,12 @@ not by the host's own activation:
 }
 #+end_src
 
-** TODO [#A] Create nix/modules/darwin.nix
+** DONE [#A] Create nix/modules/darwin.nix
 Identical option surface as =nixos.nix= for nix-darwin hosts.  The
 only difference is the module entry point; the option definition and
 documentation are the same.
 
-** TODO [#A] Expose modules from flake.nix
+** DONE [#A] Expose modules from flake.nix
 Add to the =outputs= attrset:
 
 #+begin_src nix
