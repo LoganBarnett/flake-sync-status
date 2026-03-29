@@ -43,3 +43,30 @@ hash-color-lib = { git = "https://github.com/LoganBarnett/hash-color", rev = "bf
 
 # Shared library
 flake-sync-status-lib = { path = "crates/lib" }
+
+# ============================================================================
+# BUILD PROFILES
+# ============================================================================
+# Without these settings, target/debug can easily reach 20-40 GB on
+# non-trivial projects.  Dependencies are the primary culprit.
+#
+# See https://doc.rust-lang.org/cargo/reference/profiles.html
+
+[profile.dev]
+# No debug symbols.  The debugger is rarely used and debug symbols are
+# the single largest contributor to target/ bloat.
+debug = false
+# Disable incremental compilation.  Incremental writes many small files
+# to target/debug/incremental/ that accumulate quickly; the compile-time
+# benefit rarely outweighs the disk cost for typical workflows.
+incremental = false
+
+[profile.dev.package."*"]
+# Optimize dependencies even in dev builds.  Libraries like tokio and
+# axum are bottlenecks when unoptimized; this makes the program run at
+# near-release speed during development with minimal extra compile time
+# on subsequent incremental builds.
+opt-level = 3
+
+[profile.release]
+debug = false

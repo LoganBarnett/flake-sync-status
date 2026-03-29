@@ -35,10 +35,12 @@
       };
     in [
       rust
+      pkgs.alejandra
       pkgs.cargo-sweep
-      pkgs.pkg-config
-      pkgs.openssl
       pkgs.jq
+      pkgs.openssl
+      pkgs.pkg-config
+      pkgs.treefmt
     ];
 
     craneLibFor = system: let

@@ -8,7 +8,7 @@ optional priority cookie.
 
 * rust-template Compliance
 
-** TODO [#A] Place rust-template.json
+** DONE [#A] Place rust-template.json
 The template now requires =rust-template.json= at the project root to
 track forward-port history.  Projects that predate this file may start
 with an empty =template_sync_hashes= list.  Create the file and commit
@@ -23,7 +23,7 @@ it:
 =9ddfe17= is the current template HEAD; it is the baseline for future
 forward-port diffs.
 
-** TODO [#A] Sync build profiles from template
+** DONE [#A] Sync build profiles from template
 The template now defines Cargo build profiles that prevent =target/=
 bloat.  The relevant section (verbatim from template) belongs at the
 bottom of the workspace =Cargo.toml=:
@@ -40,18 +40,18 @@ opt-level = 3
 debug = false
 #+end_src
 
-** TODO [#B] Copy llms.org and add CLAUDE.md symlink
+** DONE [#B] Copy llms.org and add CLAUDE.md symlink
 The template ships =template/llms.org= (LLM code guidelines) with a
 =CLAUDE.md= symlink pointing to it.  Copy =llms.org= to the project
 root and create the symlink so AI agents operating in this repo follow
 the right constraints.
 
-** TODO [#B] Copy ERROR_HANDLING.org
+** DONE [#B] Copy ERROR_HANDLING.org
 The template ships =template/ERROR_HANDLING.org= documenting the
 project's semantic-error philosophy.  Port it here for contributors who
 need the context.
 
-** TODO [#B] Add treefmt.toml
+** DONE [#B] Add treefmt.toml
 The template now uses a unified formatter via =treefmt=.  Port the
 =treefmt.toml= so the formatting check is consistent with the template.
 
@@ -257,7 +257,7 @@ fast-fail in scripts.
 
 * Repository Hygiene
 
-** TODO [#A] Add result to .gitignore
+** DONE [#A] Add result to .gitignore
 The =nix build= output symlink (=result=) is untracked (visible in
 =git status=).  Add it to =.gitignore= with a brief comment:
 

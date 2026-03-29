@@ -8,3 +8,7 @@
 
 # Ignore cargo generated build artifacts.
 target/
+
+# Ignore nix build output symlink.
+result
+result-*
