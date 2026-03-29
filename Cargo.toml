@@ -34,5 +34,12 @@ toml = "0.8"
 # Error handling
 thiserror = "2.0"
 
+# Table formatting — ansi feature enables ANSI-aware column width measurement
+# so colored cells don't corrupt alignment.
+tabled = { version = "0.20", features = ["ansi"] }
+
+# Deterministic hash-based terminal coloring with proper capability detection
+hash-color-lib = { git = "https://github.com/LoganBarnett/hash-color", rev = "bf539bf" }
+
 # Shared library
 flake-sync-status-lib = { path = "crates/lib" }

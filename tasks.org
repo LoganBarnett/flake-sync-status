@@ -1,0 +1,279 @@
+#+title:     flake-sync-status — Planned Work
+#+date:      2026-03-29
+#+language:  en
+
+Items are roughly ordered by dependency (infrastructure first, features
+second, polish last).  Each heading carries a TODO/DONE keyword and an
+optional priority cookie.
+
+* rust-template Compliance
+
+** TODO [#A] Place rust-template.json
+The template now requires =rust-template.json= at the project root to
+track forward-port history.  Projects that predate this file may start
+with an empty =template_sync_hashes= list.  Create the file and commit
+it:
+
+#+begin_src json
+{
+  "template_sync_hashes": ["9ddfe17"]
+}
+#+end_src
+
+=9ddfe17= is the current template HEAD; it is the baseline for future
+forward-port diffs.
+
+** TODO [#A] Sync build profiles from template
+The template now defines Cargo build profiles that prevent =target/=
+bloat.  The relevant section (verbatim from template) belongs at the
+bottom of the workspace =Cargo.toml=:
+
+#+begin_src toml
+[profile.dev]
+debug = false
+incremental = false
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+debug = false
+#+end_src
+
+** TODO [#B] Copy llms.org and add CLAUDE.md symlink
+The template ships =template/llms.org= (LLM code guidelines) with a
+=CLAUDE.md= symlink pointing to it.  Copy =llms.org= to the project
+root and create the symlink so AI agents operating in this repo follow
+the right constraints.
+
+** TODO [#B] Copy ERROR_HANDLING.org
+The template ships =template/ERROR_HANDLING.org= documenting the
+project's semantic-error philosophy.  Port it here for contributors who
+need the context.
+
+** TODO [#B] Add treefmt.toml
+The template now uses a unified formatter via =treefmt=.  Port the
+=treefmt.toml= so the formatting check is consistent with the template.
+
+** TODO [#C] Split config into config.rs (compliance: staged config)
+Template compliance requires a =config.rs= module with a staged
+configuration pattern: =CliRaw= (raw Clap output) → =ConfigFileRaw=
+(parsed config file) → =Config= (validated, fully typed).
+
+For this project =Config= is small (one flake path, logging options)
+so the staged config is lightweight.  The key change is moving the
+=Args= struct out of =main.rs= and renaming it =CliRaw=.
+
+Note: this is a compliance item, not a functional gap.  Defer if it
+creates churn disproportionate to the benefit for this project's size.
+
+* Color Fix
+
+** DONE Switch rainbow() to hash-color-lib
+The inline =fnv1a= / HSV→RGB / COLORTERM-only terminal detection in
+=color.rs= has been replaced with =hash-color-lib= (git rev =bf539bf=).
+
+Changes made:
+- Added =hash-color-lib= git dependency to workspace and cli =Cargo.toml=
+- =rainbow()= and =rainbow_platform()= now delegate to =HashColorizer=
+- =fg()= (used by =green/red/yellow=) now uses =detect_color_support()=
+  from hash-color-lib, which checks =NO_COLOR=, =FORCE_COLOR=,
+  =COLORTERM=, terminfo capabilities, and =TERM= in priority order
+- Removed the hand-rolled =fnv1a()= and =hsv_to_rgb()= functions
+- Added =test_platform_segments_distinct= test asserting aarch64 / linux
+  / darwin all produce different ANSI codes
+- All 9 tests pass
+
+* Offline Mode: NixOS and Darwin Modules
+
+** TODO [#A] Create nix/modules/nixos.nix
+NixOS module for the =flakeStatus.online= option.  The =config= section
+is intentionally empty — the option is consumed externally by the CLI,
+not by the host's own activation:
+
+#+begin_src nix
+{ lib, ... }:
+{
+  options.flakeStatus = {
+    online = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = lib.mdDoc ''
+        Whether this host is reachable for flake-sync-status checks.
+        When `false`, the CLI skips all connectivity checks and
+        reports the host as offline immediately.  Set to `false` for
+        hosts that are intentionally powered off or air-gapped.
+      '';
+    };
+  };
+}
+#+end_src
+
+** TODO [#A] Create nix/modules/darwin.nix
+Identical option surface as =nixos.nix= for nix-darwin hosts.  The
+only difference is the module entry point; the option definition and
+documentation are the same.
+
+** TODO [#A] Expose modules from flake.nix
+Add to the =outputs= attrset:
+
+#+begin_src nix
+nixosModules.default = import ./nix/modules/nixos.nix;
+darwinModules.default = import ./nix/modules/darwin.nix;
+#+end_src
+
+** TODO [#B] Query flakeStatus.online in flake.rs / query_host()
+Before running =get_current_system()=, eval:
+  =<configType>.<host>.config.flakeStatus.online=
+
+If the result is the string ="false"= (=nix eval --raw= normalises bools
+to strings), skip connectivity, set =current_path = None=, and push an
+informational entry into =errors= such as ="host is marked offline"=.
+
+If the attribute does not exist (eval error), assume =true=; not all
+configurations will import the module.
+
+** TODO [#B] Distinguish offline vs. unreachable in HostStatus
+Currently both "host is offline" and "SSH timed out" would appear as
+errors with =in_sync = None= and no =current_path=.  Add an
+=offline: bool= field (or an =OfflineMarked= error variant) so
+=output.rs= can render them with visually distinct text:
+- Offline (by config): dim "offline" in the CURRENT column, "—" in SYNC
+- Unreachable (by failure): existing red-background "unreachable"
+
+** TODO [#B] Document the modules in README.org
+Once modules are implemented, add a section showing how to import the
+module in a NixOS/nix-darwin configuration and what the option does.
+
+* Error Handling
+
+** TODO [#B] Replace thread expect() with graceful degradation
+=crates/cli/src/flake.rs:74= — =h.join().expect("host query thread panicked")=
+
+A panicking thread currently brings down the entire process.  Recover
+the panic payload via =JoinHandle::join()= returning =Err= and convert
+it to a =HostStatus= with a descriptive error entry, letting all other
+hosts still render.
+
+Example approach:
+
+#+begin_src rust
+let status = h.join().unwrap_or_else(|_| HostStatus {
+  hostname: "<unknown>".to_string(),
+  errors: vec!["host query thread panicked".to_string()],
+  ..Default::default()
+});
+#+end_src
+
+Note: if the hostname was moved into the thread, the outer closure
+needs to retain a copy to populate the error row.  Track hostnames
+alongside handles in a =(String, JoinHandle<_>)= pair.
+
+** TODO [#C] Audit error variant context richness
+Walk every variant in =FlakeError= and =HostError= and verify each one
+carries enough context that a user can act without reading source code.
+In particular: =HostError::Ssh= already includes host and reason;
+=FlakeError::ParseHostList= should include the raw output that failed
+to parse.
+
+* Parallelism
+
+** TODO [#C] Add concurrency-limit flag (--jobs / -j)
+With many hosts, all queries fire simultaneously.  Add =--jobs <N>=
+(default: unlimited) to cap in-flight threads.  Use a counting
+semaphore (=std::sync::Semaphore=, or a channel-based token bucket) to
+release slots as threads finish.
+
+This is useful when =nix eval= is memory-intensive or when SSH to a
+jump host rate-limits.
+
+* Testing
+
+** TODO [#A] Extract command execution for testability
+=crates/cli/src/flake.rs= and =host.rs= spawn =std::process::Command=
+inline.  Introduce a minimal abstraction — a function pointer or a
+trait with a single =run(args) -> Output= method — so tests can inject
+a mock runner returning canned stdout/stderr without spawning real
+processes.
+
+This single change unblocks the three unit-test tasks below.
+
+** TODO [#B] Unit tests for flake.rs
+Using the mock runner:
+- =list_hosts()= returns correct hostname list from valid JSON output
+- =list_hosts()= returns empty vec when the attribute is absent
+- =query_host()= populates =HostStatus= correctly from a happy-path run
+- =query_host()= records errors without panicking on eval failure
+- =query_host()= short-circuits when =flakeStatus.online= is =false=
+
+** TODO [#B] Unit tests for host.rs
+- =is_localhost()= matches short name, FQDN, and prefix forms
+- =get_current_system_local()= maps =io::Error= to =HostError::Local=
+- =get_current_system_remote()= maps non-zero SSH exit to =HostError::Ssh=
+
+** TODO [#B] Unit tests for output.rs
+- =print_human()= renders ✓ / ✗ / ? for each =in_sync= variant
+- =print_human()= renders offline indicator (once offline mode is done)
+- =pad()= correctly measures visible width through ANSI escape codes
+- =print_json()= round-trips through serde without field loss
+
+** TODO [#C] Expand integration tests
+Current tests only cover =--help=, =--version=, and =--json= acceptance.
+Add:
+- =--no-color= produces output with no ANSI escape sequences
+- =--log-level= / =--log-format= flags are accepted without error
+- Non-zero exit code when hosts are out of sync (see UX below)
+
+* UX Improvements
+
+** TODO [#B] Non-zero exit code when out of sync
+Useful for CI pipelines and shell =if=-blocks.  Proposed codes:
+- 0: all queried hosts in sync (or all offline)
+- 1: one or more hosts out of sync
+- 2: one or more hosts returned errors (unreachable, eval failure)
+
+These are additive: if some hosts are out of sync *and* some errored,
+return 2 (the higher severity).
+
+** TODO [#C] Summary line in human output
+After the table, print a one-line summary, e.g.:
+
+#+begin_example
+3 in sync · 1 out of sync · 1 offline · 0 errors
+#+end_example
+
+This lets users scan the bottom of the output rather than reading every
+row.
+
+** TODO [#C] --verbose flag to show full store paths
+Current output abbreviates the Nix store hash to 12 characters.  A
+=--verbose= flag (or =--full-paths=) would show the complete
+=/nix/store/…= paths for easier manual comparison or debugging.
+
+** TODO [#C] Configurable SSH timeout (--ssh-timeout)
+The 10-second =ConnectTimeout= is hard-coded.  Expose it as
+=--ssh-timeout <seconds>= for users with slow network links or for
+fast-fail in scripts.
+
+* Repository Hygiene
+
+** TODO [#A] Add result to .gitignore
+The =nix build= output symlink (=result=) is untracked (visible in
+=git status=).  Add it to =.gitignore= with a brief comment:
+
+#+begin_src gitignore
+# Ignore nix build output symlink.
+result
+result-*
+#+end_src
+
+** TODO [#B] Verify README examples match current output
+Run the tool against a real flake and compare the output with the
+=README.org= human-readable example.  Update column headers, colors
+description, or example rows if they have drifted.
+
+** TODO [#C] Add cargo-deny or cargo-audit in CI / flake check
+Currently there is no automated dependency audit.  =cargo-deny= (a
+common template addition) catches license issues and known
+vulnerabilities at CI time.  Add it as a =nix flake check= step or as
+a separate =flake.nix= package.
