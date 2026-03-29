@@ -55,7 +55,7 @@ need the context.
 The template now uses a unified formatter via =treefmt=.  Port the
 =treefmt.toml= so the formatting check is consistent with the template.
 
-** TODO [#C] Split config into config.rs (compliance: staged config)
+** DONE [#C] Split config into config.rs (compliance: staged config)
 Template compliance requires a =config.rs= module with a staged
 configuration pattern: =CliRaw= (raw Clap output) → =ConfigFileRaw=
 (parsed config file) → =Config= (validated, fully typed).
@@ -66,6 +66,10 @@ so the staged config is lightweight.  The key change is moving the
 
 Note: this is a compliance item, not a functional gap.  Defer if it
 creates churn disproportionate to the benefit for this project's size.
+
+Implemented: =CliRaw= in =config.rs= (Clap derive), =Config= with
+parsed =LogLevel=.  Also added =--verbose=, =--jobs=, and
+=--ssh-timeout= in the same pass.
 
 * Color Fix
 
@@ -178,7 +182,7 @@ includes the line/column offset which is sufficient for debugging.
 
 * Parallelism
 
-** TODO [#C] Add concurrency-limit flag (--jobs / -j)
+** DONE [#C] Add concurrency-limit flag (--jobs)
 With many hosts, all queries fire simultaneously.  Add =--jobs <N>=
 (default: unlimited) to cap in-flight threads.  Use a counting
 semaphore (=std::sync::Semaphore=, or a channel-based token bucket) to
@@ -186,6 +190,10 @@ release slots as threads finish.
 
 This is useful when =nix eval= is memory-intensive or when SSH to a
 jump host rate-limits.
+
+Implemented: =--jobs <N>= (=NonZeroUsize=) in =config.rs=; =Semaphore=
++ =SemaphorePermit= (RAII) in =flake.rs=; slot acquired before each
+thread and released on drop (panic-safe).
 
 * Testing
 
@@ -245,15 +253,23 @@ After the table, print a one-line summary, e.g.:
 This lets users scan the bottom of the output rather than reading every
 row.
 
-** TODO [#C] --verbose flag to show full store paths
+** DONE [#C] --verbose flag to show full store paths
 Current output abbreviates the Nix store hash to 12 characters.  A
 =--verbose= flag (or =--full-paths=) would show the complete
 =/nix/store/…= paths for easier manual comparison or debugging.
 
-** TODO [#C] Configurable SSH timeout (--ssh-timeout)
+Implemented: =--verbose= in =config.rs=; =print_human= gains a =verbose:
+bool= parameter; =path_cell()= helper skips =store_hash_abbrev= when
+verbose is true.
+
+** DONE [#C] Configurable SSH timeout (--ssh-timeout)
 The 10-second =ConnectTimeout= is hard-coded.  Expose it as
 =--ssh-timeout <seconds>= for users with slow network links or for
 fast-fail in scripts.
+
+Implemented: =--ssh-timeout <seconds>= (default 10) in =config.rs=;
+passed through =QueryOptions= → =flake::query_host= →
+=host::get_current_system_remote= where it sets =ConnectTimeout=.
 
 * Repository Hygiene
 
@@ -276,8 +292,15 @@ Updated the example to show an offline host (=—= in SYNC column), the
 summary line (=N in sync · M out of sync · K offline · J errors=), and
 corrected the JSON example to use =errors= array and omit null fields.
 
-** TODO [#C] Add cargo-deny or cargo-audit in CI / flake check
+** DONE [#C] Add cargo-deny or cargo-audit in CI / flake check
 Currently there is no automated dependency audit.  =cargo-deny= (a
 common template addition) catches license issues and known
 vulnerabilities at CI time.  Add it as a =nix flake check= step or as
 a separate =flake.nix= package.
+
+Implemented: =pkgs.cargo-deny= added to =devPackages=; =deny.toml=
+created with license / bans / sources config; =checks.${system}.deny=
+added to =flake.nix= via =crane.mkCargoDerivation= running
+=cargo deny check licenses bans sources= (advisory check excluded from
+sandbox due to network requirement — run =cargo deny check advisories=
+manually or in CI with network access).

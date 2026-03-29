@@ -1,0 +1,38 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+# Advisory checks require fetching the RustSec advisory database from the
+# network, which is unavailable in the Nix build sandbox.  Run manually with:
+#   cargo deny check advisories
+[advisories]
+version = 2
+ignore = []
+
+[licenses]
+version = 2
+# Deny anything that is not explicitly listed below.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+# Deny known problematic crates.
+deny = []
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# hash-color-lib is a git-only dependency.
+allow-git = ["https://github.com/LoganBarnett/hash-color"]

@@ -36,19 +36,35 @@ struct HostRow {
   sync: String,
 }
 
-pub fn print_human<W: std::io::Write>(hosts: &[HostStatus], out: &mut W) {
+/// Render the human-readable table.
+///
+/// When `verbose` is `true`, full `/nix/store/…` paths are shown instead
+/// of the abbreviated 12-character hash prefix.
+pub fn print_human<W: std::io::Write>(
+  hosts: &[HostStatus],
+  out: &mut W,
+  verbose: bool,
+) {
+  let path_cell = |path: &str| -> String {
+    if verbose {
+      color::rainbow(path)
+    } else {
+      color::rainbow(color::store_hash_abbrev(path))
+    }
+  };
+
   let rows: Vec<HostRow> = hosts
     .iter()
     .map(|h| {
       let expected = match &h.flake_path {
-        Some(path) => color::rainbow(color::store_hash_abbrev(path)),
+        Some(path) => path_cell(path),
         None => color::error_bg("eval error"),
       };
       let current = if h.offline {
         color::yellow("offline")
       } else {
         match &h.current_path {
-          Some(path) => color::rainbow(color::store_hash_abbrev(path)),
+          Some(path) => path_cell(path),
           None => color::error_bg("unreachable"),
         }
       };
@@ -184,7 +200,7 @@ mod tests {
   fn print_human_contains_hostname() {
     let hosts = vec![make_host("silicon", Some(true), false)];
     let mut buf = Vec::new();
-    print_human(&hosts, &mut buf);
+    print_human(&hosts, &mut buf, false);
     let output = String::from_utf8(buf).unwrap();
     assert!(output.contains("silicon"));
   }
@@ -193,7 +209,7 @@ mod tests {
   fn print_human_shows_offline_indicator() {
     let hosts = vec![make_host("argon", None, true)];
     let mut buf = Vec::new();
-    print_human(&hosts, &mut buf);
+    print_human(&hosts, &mut buf, false);
     let output = String::from_utf8(buf).unwrap();
     assert!(output.contains("offline"));
     assert!(output.contains('\u{2014}')); // —
@@ -207,10 +223,19 @@ mod tests {
       make_host("neon", None, true),
     ];
     let mut buf = Vec::new();
-    print_human(&hosts, &mut buf);
+    print_human(&hosts, &mut buf, false);
     let output = String::from_utf8(buf).unwrap();
     assert!(output.contains("1 in sync"));
     assert!(output.contains("1 out of sync"));
     assert!(output.contains("1 offline"));
+  }
+
+  #[test]
+  fn print_human_verbose_shows_full_path() {
+    let hosts = vec![make_host("silicon", Some(true), false)];
+    let mut buf = Vec::new();
+    print_human(&hosts, &mut buf, true);
+    let output = String::from_utf8(buf).unwrap();
+    assert!(output.contains("/nix/store/aaa111-nixos-system"));
   }
 }

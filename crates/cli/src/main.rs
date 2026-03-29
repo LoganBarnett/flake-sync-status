@@ -2,6 +2,7 @@
 //!
 //! # LLM Development Guidelines
 //! When modifying this code:
+//! - Keep CLI argument parsing and config validation in config.rs
 //! - Keep flake querying logic in flake.rs
 //! - Keep host querying logic in host.rs
 //! - Keep color/terminal logic in color.rs
@@ -10,13 +11,14 @@
 //! - Add context at each error site explaining WHAT failed and WHY
 
 mod color;
+mod config;
 mod flake;
 mod host;
 mod logging;
 mod output;
 
 use clap::Parser;
-use flake_sync_status_lib::{LogFormat, LogLevel};
+use flake_sync_status_lib::LogFormat;
 use logging::init_logging;
 use thiserror::Error;
 
@@ -27,31 +29,6 @@ enum AppError {
 
   #[error("Output failed: {0}")]
   Output(#[from] output::OutputError),
-}
-
-#[derive(Debug, Parser)]
-#[command(
-  name = "flake-sync-status",
-  version,
-  about = "Report whether each NixOS/nix-darwin host's active generation \
-           matches what the flake would deploy"
-)]
-struct Cli {
-  /// Path to the flake to inspect (default: current directory)
-  #[arg(default_value = ".")]
-  flake: String,
-
-  /// Emit JSON instead of the human-readable table
-  #[arg(long, short)]
-  json: bool,
-
-  /// Log level (trace, debug, info, warn, error)
-  #[arg(long, default_value = "warn", env = "LOG_LEVEL")]
-  log_level: String,
-
-  /// Suppress all ANSI color codes in output (also honored via NO_COLOR env var)
-  #[arg(long)]
-  no_color: bool,
 }
 
 fn main() {
@@ -65,21 +42,25 @@ fn main() {
 }
 
 fn run() -> Result<i32, AppError> {
-  let cli = Cli::parse();
+  let cfg = config::Config::from_cli(config::CliRaw::parse());
 
-  if cli.no_color {
+  if cfg.no_color {
     color::disable_color();
   }
 
-  let log_level = cli.log_level.parse::<LogLevel>().unwrap_or(LogLevel::Warn);
-  init_logging(log_level, LogFormat::Text);
+  init_logging(cfg.log_level, LogFormat::Text);
 
-  let results = flake::query_all_hosts(&cli.flake, host::system_runner)?;
+  let opts = flake::QueryOptions {
+    jobs: cfg.jobs,
+    ssh_timeout: cfg.ssh_timeout,
+  };
 
-  if cli.json {
+  let results = flake::query_all_hosts(&cfg.flake, host::system_runner, &opts)?;
+
+  if cfg.json {
     output::print_json(&results, &mut std::io::stdout())?;
   } else {
-    output::print_human(&results, &mut std::io::stdout());
+    output::print_human(&results, &mut std::io::stdout(), cfg.verbose);
   }
 
   Ok(exit_code(&results))

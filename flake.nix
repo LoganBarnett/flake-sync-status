@@ -36,6 +36,7 @@
     in [
       rust
       pkgs.alejandra
+      pkgs.cargo-deny
       pkgs.cargo-sweep
       pkgs.jq
       pkgs.openssl
@@ -59,6 +60,25 @@
       cargoTestExtraArgs = "--lib --bins";
     };
   in {
+
+    checks = forAllSystems (system: let
+      craneLib = craneLibFor system;
+      args = commonArgsFor system;
+      pkgs = pkgsFor system;
+    in {
+      # License, ban, and source-policy checks via cargo-deny.
+      # Advisory checks are omitted here because they require fetching the
+      # RustSec advisory DB, which is unavailable in the Nix build sandbox.
+      # Run `cargo deny check advisories` manually or in CI.
+      deny = craneLib.mkCargoDerivation (args // {
+        pname = "flake-sync-status-deny";
+        cargoArtifacts = null;
+        doInstallCargoArtifacts = false;
+        buildPhaseCargoCommand =
+          "cargo deny check licenses bans sources";
+        nativeBuildInputs = (args.nativeBuildInputs or []) ++ [ pkgs.cargo-deny ];
+      });
+    });
 
     packages = forAllSystems (system: {
       default = (craneLibFor system).buildPackage (commonArgsFor system);

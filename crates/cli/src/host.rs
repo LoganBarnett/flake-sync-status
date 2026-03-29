@@ -72,15 +72,16 @@ fn is_localhost(runner: Runner, hostname: &str) -> bool {
 
 /// Return the store path of the currently-active system generation on
 /// the named host.  Connects via SSH for remote hosts; reads directly
-/// for local.
+/// for local.  `ssh_timeout` controls the SSH `ConnectTimeout` in seconds.
 pub fn get_current_system(
   runner: Runner,
   hostname: &str,
+  ssh_timeout: u32,
 ) -> Result<String, HostError> {
   if is_localhost(runner, hostname) {
     get_current_system_local(runner)
   } else {
-    get_current_system_remote(runner, hostname)
+    get_current_system_remote(runner, hostname, ssh_timeout)
   }
 }
 
@@ -98,12 +99,14 @@ fn get_current_system_local(runner: Runner) -> Result<String, HostError> {
 fn get_current_system_remote(
   runner: Runner,
   hostname: &str,
+  ssh_timeout: u32,
 ) -> Result<String, HostError> {
+  let timeout_opt = format!("ConnectTimeout={ssh_timeout}");
   let output = runner(
     "ssh",
     &[
       "-o",
-      "ConnectTimeout=10",
+      &timeout_opt,
       // Fail immediately rather than prompting for passwords or host
       // key confirmations.
       "-o",
@@ -197,7 +200,7 @@ mod tests {
       ok_output(b"/nix/store/xyz999-nixos-system\n")
     }
     assert_eq!(
-      get_current_system_remote(runner, "argon").unwrap(),
+      get_current_system_remote(runner, "argon", 10).unwrap(),
       "/nix/store/xyz999-nixos-system"
     );
   }
@@ -207,7 +210,7 @@ mod tests {
     fn runner(_p: &str, _a: &[&str]) -> std::io::Result<CommandOutput> {
       err_output(b"ssh: connect to host argon port 22: Connection refused")
     }
-    let err = get_current_system_remote(runner, "argon").unwrap_err();
+    let err = get_current_system_remote(runner, "argon", 10).unwrap_err();
     assert!(matches!(err, HostError::Ssh { host, .. } if host == "argon"));
   }
 }

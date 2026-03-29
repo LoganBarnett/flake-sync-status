@@ -1,5 +1,6 @@
 use crate::host::{self, Runner};
 use serde::Serialize;
+use std::sync::{Arc, Condvar, Mutex};
 use thiserror::Error;
 use tracing::warn;
 
@@ -54,17 +55,68 @@ pub struct HostStatus {
   pub in_sync: Option<bool>,
 }
 
+/// Options controlling how hosts are queried.
+pub struct QueryOptions {
+  /// Cap on the number of hosts queried concurrently.  `None` means unlimited.
+  pub jobs: Option<usize>,
+  /// SSH `ConnectTimeout` in seconds.
+  pub ssh_timeout: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Concurrency limit: simple counting semaphore
+// ---------------------------------------------------------------------------
+
+struct Semaphore {
+  count: Mutex<usize>,
+  cvar: Condvar,
+}
+
+impl Semaphore {
+  fn new(n: usize) -> Self {
+    Semaphore {
+      count: Mutex::new(n),
+      cvar: Condvar::new(),
+    }
+  }
+
+  fn acquire(&self) {
+    let mut count = self.count.lock().unwrap();
+    while *count == 0 {
+      count = self.cvar.wait(count).unwrap();
+    }
+    *count -= 1;
+  }
+
+  fn release(&self) {
+    let mut count = self.count.lock().unwrap();
+    *count += 1;
+    self.cvar.notify_one();
+  }
+}
+
+/// RAII permit: holds an `Arc<Semaphore>` and releases one slot on drop,
+/// ensuring the semaphore is released even if the holding thread panics.
+struct SemaphorePermit(Arc<Semaphore>);
+
+impl Drop for SemaphorePermit {
+  fn drop(&mut self) {
+    self.0.release();
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 /// Query all nixosConfigurations and darwinConfigurations in the flake
 /// and return a status entry for each host.  Per-host eval or SSH
 /// errors are captured in `HostStatus.errors` rather than aborting
 /// the whole run.
 ///
-/// All hosts are queried in parallel: each makes independent nix eval
-/// and SSH calls with no shared mutable state, so serializing them
-/// buys nothing.
+/// Hosts are queried in parallel (up to `opts.jobs` concurrent threads).
 pub fn query_all_hosts(
   flake: &str,
   runner: Runner,
+  opts: &QueryOptions,
 ) -> Result<Vec<HostStatus>, FlakeError> {
   // Collect (hostname, config_type) pairs first — list_hosts is fast
   // and must propagate FlakeError before we start spawning threads.
@@ -76,6 +128,10 @@ pub fn query_all_hosts(
   }
 
   let flake = flake.to_string();
+  let ssh_timeout = opts.ssh_timeout;
+  let sem: Option<Arc<Semaphore>> =
+    opts.jobs.map(|n| Arc::new(Semaphore::new(n)));
+
   // Retain the hostname in the outer scope so a thread panic can still
   // produce a labeled error row rather than silently dropping the host.
   let handles: Vec<(String, std::thread::JoinHandle<HostStatus>)> = pairs
@@ -83,8 +139,16 @@ pub fn query_all_hosts(
     .map(|(hostname, config_type)| {
       let flake = flake.clone();
       let hostname_copy = hostname.clone();
+      let sem_clone = sem.clone();
       let handle = std::thread::spawn(move || {
-        query_host(runner, &flake, &hostname_copy, &config_type)
+        // Acquire a semaphore slot if a concurrency limit is set.
+        // The permit is held for the duration of this thread and
+        // released automatically on exit (including on panic).
+        let _permit = sem_clone.map(|s| {
+          s.acquire();
+          SemaphorePermit(s)
+        });
+        query_host(runner, &flake, &hostname_copy, &config_type, ssh_timeout)
       });
       (hostname, handle)
     })
@@ -143,6 +207,7 @@ fn query_host(
   flake: &str,
   hostname: &str,
   config_type: &str,
+  ssh_timeout: u32,
 ) -> HostStatus {
   let mut errors = Vec::new();
 
@@ -197,14 +262,15 @@ fn query_host(
     };
   }
 
-  let current_path = match host::get_current_system(runner, &ssh_host) {
-    Ok(path) => Some(path),
-    Err(e) => {
-      warn!(hostname, error = %e, "host query failed");
-      errors.push(e.to_string());
-      None
-    }
-  };
+  let current_path =
+    match host::get_current_system(runner, &ssh_host, ssh_timeout) {
+      Ok(path) => Some(path),
+      Err(e) => {
+        warn!(hostname, error = %e, "host query failed");
+        errors.push(e.to_string());
+        None
+      }
+    };
 
   let in_sync = match (&flake_path, &current_path) {
     (Some(f), Some(c)) => Some(f == c),

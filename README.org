@@ -21,12 +21,15 @@ flake-sync-status [OPTIONS] [FLAKE]
 
 ** Options
 
-| Flag              | Description                                    |
-|-------------------+------------------------------------------------|
-| ~-j~, ~--json~    | Emit JSON instead of the table                 |
-| ~--no-color~      | Suppress all ANSI color codes                  |
-| ~--log-level~     | Log level (default: ~warn~)                    |
-| ~-h~, ~--help~    | Print help                                     |
+| Flag                    | Description                                          |
+|-------------------------+------------------------------------------------------|
+| ~-j~, ~--json~          | Emit JSON instead of the table                       |
+| ~--verbose~             | Show full =/nix/store/…= paths (default: abbreviated)|
+| ~--jobs <N>~            | Max concurrent host queries (default: unlimited)     |
+| ~--ssh-timeout <secs>~  | SSH connect timeout in seconds (default: 10)         |
+| ~--no-color~            | Suppress all ANSI color codes                        |
+| ~--log-level~           | Log level (default: ~warn~)                          |
+| ~-h~, ~--help~          | Print help                                           |
 
 Color output is also suppressed when the ~NO_COLOR~ environment variable is set
 ([[https://no-color.org/]]).
