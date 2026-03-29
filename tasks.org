@@ -122,7 +122,7 @@ nixosModules.default = import ./nix/modules/nixos.nix;
 darwinModules.default = import ./nix/modules/darwin.nix;
 #+end_src
 
-** TODO [#B] Query flakeStatus.online in flake.rs / query_host()
+** DONE [#B] Query flakeStatus.online in flake.rs / query_host()
 Before running =get_current_system()=, eval:
   =<configType>.<host>.config.flakeStatus.online=
 
@@ -133,7 +133,7 @@ informational entry into =errors= such as ="host is marked offline"=.
 If the attribute does not exist (eval error), assume =true=; not all
 configurations will import the module.
 
-** TODO [#B] Distinguish offline vs. unreachable in HostStatus
+** DONE [#B] Distinguish offline vs. unreachable in HostStatus
 Currently both "host is offline" and "SSH timed out" would appear as
 errors with =in_sync = None= and no =current_path=.  Add an
 =offline: bool= field (or an =OfflineMarked= error variant) so
@@ -147,7 +147,7 @@ module in a NixOS/nix-darwin configuration and what the option does.
 
 * Error Handling
 
-** TODO [#B] Replace thread expect() with graceful degradation
+** DONE [#B] Replace thread expect() with graceful degradation
 =crates/cli/src/flake.rs:74= — =h.join().expect("host query thread panicked")=
 
 A panicking thread currently brings down the entire process.  Recover
@@ -169,12 +169,12 @@ Note: if the hostname was moved into the thread, the outer closure
 needs to retain a copy to populate the error row.  Track hostnames
 alongside handles in a =(String, JoinHandle<_>)= pair.
 
-** TODO [#C] Audit error variant context richness
-Walk every variant in =FlakeError= and =HostError= and verify each one
-carries enough context that a user can act without reading source code.
-In particular: =HostError::Ssh= already includes host and reason;
-=FlakeError::ParseHostList= should include the raw output that failed
-to parse.
+** DONE [#C] Audit error variant context richness
+Reviewed =FlakeError= and =HostError=.  All variants carry host name,
+attribute path, flake path, and/or underlying source error as
+appropriate.  =FlakeError::ParseHostList= omits the raw bytes (they
+are typically large JSON blobs); the =serde_json::Error= source
+includes the line/column offset which is sufficient for debugging.
 
 * Parallelism
 
@@ -189,7 +189,7 @@ jump host rate-limits.
 
 * Testing
 
-** TODO [#A] Extract command execution for testability
+** DONE [#A] Extract command execution for testability
 =crates/cli/src/flake.rs= and =host.rs= spawn =std::process::Command=
 inline.  Introduce a minimal abstraction — a function pointer or a
 trait with a single =run(args) -> Output= method — so tests can inject
@@ -198,7 +198,7 @@ processes.
 
 This single change unblocks the three unit-test tasks below.
 
-** TODO [#B] Unit tests for flake.rs
+** DONE [#B] Unit tests for flake.rs
 Using the mock runner:
 - =list_hosts()= returns correct hostname list from valid JSON output
 - =list_hosts()= returns empty vec when the attribute is absent
@@ -206,18 +206,18 @@ Using the mock runner:
 - =query_host()= records errors without panicking on eval failure
 - =query_host()= short-circuits when =flakeStatus.online= is =false=
 
-** TODO [#B] Unit tests for host.rs
+** DONE [#B] Unit tests for host.rs
 - =is_localhost()= matches short name, FQDN, and prefix forms
 - =get_current_system_local()= maps =io::Error= to =HostError::Local=
 - =get_current_system_remote()= maps non-zero SSH exit to =HostError::Ssh=
 
-** TODO [#B] Unit tests for output.rs
+** DONE [#B] Unit tests for output.rs
 - =print_human()= renders ✓ / ✗ / ? for each =in_sync= variant
 - =print_human()= renders offline indicator (once offline mode is done)
 - =pad()= correctly measures visible width through ANSI escape codes
 - =print_json()= round-trips through serde without field loss
 
-** TODO [#C] Expand integration tests
+** DONE [#C] Expand integration tests
 Current tests only cover =--help=, =--version=, and =--json= acceptance.
 Add:
 - =--no-color= produces output with no ANSI escape sequences
@@ -226,7 +226,7 @@ Add:
 
 * UX Improvements
 
-** TODO [#B] Non-zero exit code when out of sync
+** DONE [#B] Non-zero exit code when out of sync
 Useful for CI pipelines and shell =if=-blocks.  Proposed codes:
 - 0: all queried hosts in sync (or all offline)
 - 1: one or more hosts out of sync
@@ -235,7 +235,7 @@ Useful for CI pipelines and shell =if=-blocks.  Proposed codes:
 These are additive: if some hosts are out of sync *and* some errored,
 return 2 (the higher severity).
 
-** TODO [#C] Summary line in human output
+** DONE [#C] Summary line in human output
 After the table, print a one-line summary, e.g.:
 
 #+begin_example

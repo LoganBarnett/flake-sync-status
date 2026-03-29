@@ -54,7 +54,17 @@ struct Cli {
   no_color: bool,
 }
 
-fn main() -> Result<(), AppError> {
+fn main() {
+  match run() {
+    Ok(code) => std::process::exit(code),
+    Err(e) => {
+      eprintln!("Error: {e}");
+      std::process::exit(3);
+    }
+  }
+}
+
+fn run() -> Result<i32, AppError> {
   let cli = Cli::parse();
 
   if cli.no_color {
@@ -64,13 +74,28 @@ fn main() -> Result<(), AppError> {
   let log_level = cli.log_level.parse::<LogLevel>().unwrap_or(LogLevel::Warn);
   init_logging(log_level, LogFormat::Text);
 
-  let results = flake::query_all_hosts(&cli.flake)?;
+  let results = flake::query_all_hosts(&cli.flake, host::system_runner)?;
 
   if cli.json {
-    output::print_json(&results)?;
+    output::print_json(&results, &mut std::io::stdout())?;
   } else {
-    output::print_human(&results);
+    output::print_human(&results, &mut std::io::stdout());
   }
 
-  Ok(())
+  Ok(exit_code(&results))
+}
+
+/// Compute the process exit code from query results.
+///
+/// 0 — all online hosts are in sync (or there are no hosts).
+/// 1 — one or more online hosts are out of sync.
+/// 2 — one or more hosts have errors (unreachable, eval failure).
+fn exit_code(hosts: &[flake::HostStatus]) -> i32 {
+  if hosts.iter().any(|h| !h.offline && !h.errors.is_empty()) {
+    2
+  } else if hosts.iter().any(|h| !h.offline && h.in_sync == Some(false)) {
+    1
+  } else {
+    0
+  }
 }

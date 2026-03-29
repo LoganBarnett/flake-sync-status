@@ -23,15 +23,13 @@ fn test_help_flag() {
   let output = Command::new(get_binary_path())
     .arg("--help")
     .output()
-    .expect("Failed to execute binary. Build first: cargo build -p flake-sync-status");
+    .expect(
+      "Failed to execute binary. Build first: cargo build -p flake-sync-status",
+    );
 
   assert!(output.status.success());
   let stdout = String::from_utf8_lossy(&output.stdout);
-  assert!(
-    stdout.contains("Usage:"),
-    "Expected help text, got: {}",
-    stdout
-  );
+  assert!(stdout.contains("Usage:"), "Expected help text, got: {}", stdout);
 }
 
 #[test]
@@ -39,7 +37,9 @@ fn test_version_flag() {
   let output = Command::new(get_binary_path())
     .arg("--version")
     .output()
-    .expect("Failed to execute binary. Build first: cargo build -p flake-sync-status");
+    .expect(
+      "Failed to execute binary. Build first: cargo build -p flake-sync-status",
+    );
 
   assert!(output.status.success());
   let stdout = String::from_utf8_lossy(&output.stdout);
@@ -58,7 +58,31 @@ fn test_json_flag_is_accepted() {
   let output = Command::new(get_binary_path())
     .args(["--json", "--help"])
     .output()
-    .expect("Failed to execute binary. Build first: cargo build -p flake-sync-status");
+    .expect(
+      "Failed to execute binary. Build first: cargo build -p flake-sync-status",
+    );
 
+  assert!(output.status.success());
+}
+
+#[test]
+fn test_no_color_flag_suppresses_ansi() {
+  let output = Command::new(get_binary_path())
+    .args(["--no-color", "--help"])
+    .output()
+    .expect("Failed to execute binary");
+  let stdout = String::from_utf8_lossy(&output.stdout);
+  assert!(
+    !stdout.contains("\x1b["),
+    "--no-color output must not contain ANSI escape sequences"
+  );
+}
+
+#[test]
+fn test_log_level_flag_accepted() {
+  let output = Command::new(get_binary_path())
+    .args(["--log-level", "debug", "--help"])
+    .output()
+    .expect("Failed to execute binary");
   assert!(output.status.success());
 }

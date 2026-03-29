@@ -1,8 +1,11 @@
-use crate::host;
+use crate::host::{self, Runner};
 use serde::Serialize;
-use std::process::Command;
 use thiserror::Error;
 use tracing::warn;
+
+fn is_false(b: &bool) -> bool {
+  !*b
+}
 
 #[derive(Debug, Error)]
 pub enum FlakeError {
@@ -29,69 +32,98 @@ pub struct HostStatus {
   pub hostname: String,
   /// Platform double such as `x86_64-linux` or `aarch64-darwin`.
   pub system: String,
+  /// True when the host declares `flakeStatus.online = false` in its
+  /// NixOS/nix-darwin configuration.  When offline, connectivity
+  /// checks are skipped and `current_path` is not populated.
+  #[serde(default, skip_serializing_if = "is_false")]
+  pub offline: bool,
   /// Store path the flake expects for this host, or null when flake
-  /// evaluation failed for this host.
+  /// evaluation failed.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub flake_path: Option<String>,
-  /// Store path of the currently-active generation on the host, or null when
-  /// the host was unreachable.
+  /// Store path of the currently-active generation on the host, or
+  /// null when the host was unreachable or is offline.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub current_path: Option<String>,
   /// Error messages from flake evaluation or SSH connection failures.
   #[serde(skip_serializing_if = "Vec::is_empty")]
   pub errors: Vec<String>,
-  pub in_sync: bool,
+  /// Whether the expected and current store paths match.  None when
+  /// either path could not be determined or when the host is offline.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub in_sync: Option<bool>,
 }
 
-/// Query all nixosConfigurations and darwinConfigurations in the flake and
-/// return a status entry for each host.  Per-host eval or SSH errors are
-/// captured in HostStatus.errors rather than aborting the whole run.
+/// Query all nixosConfigurations and darwinConfigurations in the flake
+/// and return a status entry for each host.  Per-host eval or SSH
+/// errors are captured in `HostStatus.errors` rather than aborting
+/// the whole run.
 ///
-/// All hosts are queried in parallel: each makes independent nix eval and SSH
-/// calls with no shared mutable state, so serializing them buys nothing.
-pub fn query_all_hosts(flake: &str) -> Result<Vec<HostStatus>, FlakeError> {
-  // Collect (hostname, config_type) pairs first — list_hosts is fast and must
-  // propagate FlakeError before we start spawning threads.
+/// All hosts are queried in parallel: each makes independent nix eval
+/// and SSH calls with no shared mutable state, so serializing them
+/// buys nothing.
+pub fn query_all_hosts(
+  flake: &str,
+  runner: Runner,
+) -> Result<Vec<HostStatus>, FlakeError> {
+  // Collect (hostname, config_type) pairs first — list_hosts is fast
+  // and must propagate FlakeError before we start spawning threads.
   let mut pairs: Vec<(String, String)> = Vec::new();
   for config_type in &["nixosConfigurations", "darwinConfigurations"] {
-    for hostname in list_hosts(flake, config_type)? {
+    for hostname in list_hosts(runner, flake, config_type)? {
       pairs.push((hostname, config_type.to_string()));
     }
   }
 
   let flake = flake.to_string();
-  let handles: Vec<_> = pairs
+  // Retain the hostname in the outer scope so a thread panic can still
+  // produce a labeled error row rather than silently dropping the host.
+  let handles: Vec<(String, std::thread::JoinHandle<HostStatus>)> = pairs
     .into_iter()
     .map(|(hostname, config_type)| {
       let flake = flake.clone();
-      std::thread::spawn(move || query_host(&flake, &hostname, &config_type))
+      let hostname_copy = hostname.clone();
+      let handle = std::thread::spawn(move || {
+        query_host(runner, &flake, &hostname_copy, &config_type)
+      });
+      (hostname, handle)
     })
     .collect();
 
   Ok(
     handles
       .into_iter()
-      .map(|h| h.join().expect("host query thread panicked"))
+      .map(|(hostname, h)| {
+        h.join().unwrap_or_else(|_| HostStatus {
+          hostname,
+          system: "unknown".to_string(),
+          offline: false,
+          flake_path: None,
+          current_path: None,
+          errors: vec!["host query thread panicked".to_string()],
+          in_sync: None,
+        })
+      })
       .collect(),
   )
 }
 
 fn list_hosts(
+  runner: Runner,
   flake: &str,
   config_type: &str,
 ) -> Result<Vec<String>, FlakeError> {
   let attr = format!("{}#{}", flake, config_type);
-  let output = Command::new("nix")
-    .args(["eval", "--json", &attr, "--apply", "builtins.attrNames"])
-    .output()
-    .map_err(|source| FlakeError::Spawn {
-      flake: flake.to_string(),
-      attr: attr.clone(),
-      source,
-    })?;
+  let output =
+    runner("nix", &["eval", "--json", &attr, "--apply", "builtins.attrNames"])
+      .map_err(|source| FlakeError::Spawn {
+        flake: flake.to_string(),
+        attr: attr.clone(),
+        source,
+      })?;
 
   // A missing attribute means no hosts of this type; treat as empty.
-  if !output.status.success() {
+  if !output.success {
     return Ok(vec![]);
   }
 
@@ -106,7 +138,12 @@ fn list_hosts(
   Ok(names)
 }
 
-fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
+fn query_host(
+  runner: Runner,
+  flake: &str,
+  hostname: &str,
+  config_type: &str,
+) -> HostStatus {
   let mut errors = Vec::new();
 
   let path_attr = format!(
@@ -118,7 +155,7 @@ fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
     flake, config_type, hostname
   );
 
-  let flake_path = match nix_eval_raw(flake, &path_attr) {
+  let flake_path = match nix_eval_raw(runner, flake, &path_attr) {
     Ok(p) => Some(p),
     Err(e) => {
       warn!(hostname, error = %e, "flake eval failed");
@@ -127,18 +164,40 @@ fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
     }
   };
 
-  let system =
-    nix_eval_raw(flake, &system_attr).unwrap_or_else(|_| "unknown".to_string());
+  let system = nix_eval_raw(runner, flake, &system_attr)
+    .unwrap_or_else(|_| "unknown".to_string());
 
-  // Use the FQDN from the flake config as the SSH target so that host key
-  // verification matches known_hosts entries (which are keyed by FQDN).
-  // Falls back to the attribute name if the option is absent (e.g. darwin).
+  // Use the FQDN from the flake config as the SSH target so that host
+  // key verification matches known_hosts entries (which are keyed by
+  // FQDN).  Falls back to the attribute name if the option is absent
+  // (e.g. darwin).
   let fqdn_attr =
     format!("{}#{}.{}.config.networking.fqdn", flake, config_type, hostname);
-  let ssh_host =
-    nix_eval_raw(flake, &fqdn_attr).unwrap_or_else(|_| hostname.to_string());
+  let ssh_host = nix_eval_raw(runner, flake, &fqdn_attr)
+    .unwrap_or_else(|_| hostname.to_string());
 
-  let current_path = match host::get_current_system(&ssh_host) {
+  // If the host is explicitly marked offline, skip connectivity checks.
+  // When the attribute doesn't exist (module not imported), assume
+  // online so configs without the module are not affected.
+  let online_attr =
+    format!("{}#{}.{}.config.flakeStatus.online", flake, config_type, hostname);
+  let is_offline = nix_eval_raw(runner, flake, &online_attr)
+    .map(|v| v.trim() == "false")
+    .unwrap_or(false);
+
+  if is_offline {
+    return HostStatus {
+      hostname: hostname.to_string(),
+      system,
+      offline: true,
+      flake_path,
+      current_path: None,
+      errors,
+      in_sync: None,
+    };
+  }
+
+  let current_path = match host::get_current_system(runner, &ssh_host) {
     Ok(path) => Some(path),
     Err(e) => {
       warn!(hostname, error = %e, "host query failed");
@@ -148,13 +207,14 @@ fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
   };
 
   let in_sync = match (&flake_path, &current_path) {
-    (Some(f), Some(c)) => f == c,
-    _ => false,
+    (Some(f), Some(c)) => Some(f == c),
+    _ => None,
   };
 
   HostStatus {
     hostname: hostname.to_string(),
     system,
+    offline: false,
     flake_path,
     current_path,
     errors,
@@ -162,17 +222,18 @@ fn query_host(flake: &str, hostname: &str, config_type: &str) -> HostStatus {
   }
 }
 
-fn nix_eval_raw(flake: &str, attr: &str) -> Result<String, String> {
-  let output = Command::new("nix")
-    .args(["eval", "--raw", attr])
-    .output()
-    .map_err(|e| {
-      format!("Failed to spawn nix for attribute {attr} at flake {flake}: {e}")
-    })?;
+fn nix_eval_raw(
+  runner: Runner,
+  flake: &str,
+  attr: &str,
+) -> Result<String, String> {
+  let output = runner("nix", &["eval", "--raw", attr]).map_err(|e| {
+    format!("Failed to spawn nix for attribute {attr} at flake {flake}: {e}")
+  })?;
 
-  if !output.status.success() {
-    // Extract just the final error line from nix's verbose stderr rather than
-    // dumping the full trace into the errors list.
+  if !output.success {
+    // Extract just the final error line from nix's verbose stderr rather
+    // than dumping the full trace into the errors list.
     let stderr = String::from_utf8_lossy(&output.stderr);
     let summary = stderr
       .lines()
@@ -185,4 +246,69 @@ fn nix_eval_raw(flake: &str, attr: &str) -> Result<String, String> {
   }
 
   Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::host::CommandOutput;
+
+  fn ok_output(stdout: &[u8]) -> std::io::Result<CommandOutput> {
+    Ok(CommandOutput {
+      stdout: stdout.to_vec(),
+      stderr: vec![],
+      success: true,
+    })
+  }
+
+  fn err_output(stderr: &[u8]) -> std::io::Result<CommandOutput> {
+    Ok(CommandOutput {
+      stdout: vec![],
+      stderr: stderr.to_vec(),
+      success: false,
+    })
+  }
+
+  #[test]
+  fn list_hosts_parses_json_names() {
+    fn runner(_p: &str, _a: &[&str]) -> std::io::Result<CommandOutput> {
+      ok_output(br#"["silicon","argon"]"#)
+    }
+    let names = list_hosts(runner, ".", "nixosConfigurations").unwrap();
+    assert_eq!(names, vec!["silicon", "argon"]);
+  }
+
+  #[test]
+  fn list_hosts_returns_empty_on_missing_attr() {
+    fn runner(_p: &str, _a: &[&str]) -> std::io::Result<CommandOutput> {
+      err_output(b"error: attribute 'darwinConfigurations' missing")
+    }
+    let names = list_hosts(runner, ".", "darwinConfigurations").unwrap();
+    assert!(names.is_empty());
+  }
+
+  #[test]
+  fn nix_eval_raw_returns_trimmed_output() {
+    fn runner(_p: &str, _a: &[&str]) -> std::io::Result<CommandOutput> {
+      ok_output(b"/nix/store/abc123-system \n")
+    }
+    assert_eq!(
+      nix_eval_raw(
+        runner,
+        ".",
+        ".#nixosConfigurations.silicon.config.system.build.toplevel.outPath"
+      )
+      .unwrap(),
+      "/nix/store/abc123-system"
+    );
+  }
+
+  #[test]
+  fn nix_eval_raw_extracts_last_error_line() {
+    fn runner(_p: &str, _a: &[&str]) -> std::io::Result<CommandOutput> {
+      err_output(b"trace: evaluating\nerror: attribute missing\n")
+    }
+    let err = nix_eval_raw(runner, ".", ".#attr").unwrap_err();
+    assert!(err.contains("error: attribute missing"));
+  }
 }
