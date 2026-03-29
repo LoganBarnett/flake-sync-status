@@ -141,7 +141,7 @@ errors with =in_sync = None= and no =current_path=.  Add an
 - Offline (by config): dim "offline" in the CURRENT column, "—" in SYNC
 - Unreachable (by failure): existing red-background "unreachable"
 
-** TODO [#B] Document the modules in README.org
+** DONE [#B] Document the modules in README.org
 Once modules are implemented, add a section showing how to import the
 module in a NixOS/nix-darwin configuration and what the option does.
 
@@ -267,10 +267,14 @@ result
 result-*
 #+end_src
 
-** TODO [#B] Verify README examples match current output
+** DONE [#B] Verify README examples match current output
 Run the tool against a real flake and compare the output with the
 =README.org= human-readable example.  Update column headers, colors
 description, or example rows if they have drifted.
+
+Updated the example to show an offline host (=—= in SYNC column), the
+summary line (=N in sync · M out of sync · K offline · J errors=), and
+corrected the JSON example to use =errors= array and omit null fields.
 
 ** TODO [#C] Add cargo-deny or cargo-audit in CI / flake check
 Currently there is no automated dependency audit.  =cargo-deny= (a
