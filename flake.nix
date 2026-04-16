@@ -2,7 +2,7 @@
   description = "Check whether NixOS/nix-darwin hosts are in sync with a flake";
   inputs = {
     crane.url = "github:ipetkov/crane";
-    nixpkgs.url = github:NixOS/nixpkgs/25.11;
+    nixpkgs.url = "github:NixOS/nixpkgs/25.11";
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
